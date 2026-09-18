@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.buildscript-devv.oneplus-experience",
+  "id": "io.github.buildscript-dev.oneplus-experience",
   "name": "OnePlus Experience",
   "version": "1.0.0",
-  "author": "buildscript-devv",
+  "author": "buildscript-dev",
   "license": "MIT",
   "description": "The native AirPods-style experience for OnePlus earbuds: a HeyMelody alternative for Omarchy. Per-bud and case battery in the bar, a full control center for noise cancellation, Smart ANC, strength, EQ and switches, plus connect notifications and low-battery alerts.",
   "kinds": [

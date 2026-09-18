@@ -52,8 +52,8 @@ No root access, PyPI packages or network access are needed.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/buildscript-devv/omarchy-oneplus-experience.git --enable
-~/.config/omarchy/plugins/io.github.buildscript-devv.oneplus-experience/setup
+omarchy plugin add https://github.com/buildscript-dev/omarchy-oneplus-experience.git --enable
+~/.config/omarchy/plugins/io.github.buildscript-dev.oneplus-experience/setup
 ```
 
 `omarchy plugin add` only clones the plugin. `setup` then does three things,
@@ -90,7 +90,7 @@ RFCOMM channel and last ANC strength in `~/.config/oneplus-experience/config.jso
 systemctl --user disable --now oneplus-experience
 rm ~/.config/systemd/user/oneplus-experience.service ~/.local/bin/oneplus-experience-ctl
 rm -rf ~/.config/oneplus-experience ~/.local/state/oneplus-experience
-omarchy plugin remove io.github.buildscript-devv.oneplus-experience
+omarchy plugin remove io.github.buildscript-dev.oneplus-experience
 ```
 
 ## Credits

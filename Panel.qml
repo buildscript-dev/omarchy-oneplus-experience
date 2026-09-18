@@ -9,7 +9,7 @@ import "Model.js" as Model
 
 Panel {
   id: root
-  moduleName: "io.github.buildscript-devv.oneplus-experience"
+  moduleName: "io.github.buildscript-dev.oneplus-experience"
   ipcTarget: "oneplus-experience"
   manageIpc: false
 

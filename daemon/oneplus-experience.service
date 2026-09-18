@@ -2,10 +2,10 @@
 Description=OnePlus Buds controls for the Omarchy bar
 After=bluetooth.target graphical-session.target
 PartOf=graphical-session.target
-ConditionPathExists=%h/.config/omarchy/plugins/io.github.buildscript-devv.oneplus-experience/daemon/oneplus-experience.py
+ConditionPathExists=%h/.config/omarchy/plugins/io.github.buildscript-dev.oneplus-experience/daemon/oneplus-experience.py
 
 [Service]
-ExecStart=/usr/bin/python3 %h/.config/omarchy/plugins/io.github.buildscript-devv.oneplus-experience/daemon/oneplus-experience.py daemon
+ExecStart=/usr/bin/python3 %h/.config/omarchy/plugins/io.github.buildscript-dev.oneplus-experience/daemon/oneplus-experience.py daemon
 Restart=on-failure
 RestartSec=3
 
