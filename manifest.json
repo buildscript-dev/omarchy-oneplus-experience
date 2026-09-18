@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.buildscript-devv.onepods",
+  "name": "OnePlus Buds",
+  "version": "0.1.0",
+  "author": "buildscript-devv",
+  "license": "MIT",
+  "description": "OnePlus Buds controls in the Omarchy bar: per-bud and case battery, noise cancellation with strength, Smart ANC, EQ presets and feature switches, over the HeyMelody protocol.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "OnePlus Buds",
+    "description": "Battery, noise control, EQ and switches for OnePlus / OPPO earbuds.",
+    "category": "Audio",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "hideWhenDisconnected": false,
+      "showBatteryInBar": true,
+      "ctlPath": ""
+    },
+    "schema": [
+      {
+        "key": "hideWhenDisconnected",
+        "type": "boolean",
+        "label": "Hide the icon when the earbuds are not connected",
+        "defaultValue": false
+      },
+      {
+        "key": "showBatteryInBar",
+        "type": "boolean",
+        "label": "Show the earbud battery next to the icon",
+        "defaultValue": true
+      },
+      {
+        "key": "ctlPath",
+        "type": "path",
+        "label": "Path to onepods-ctl",
+        "description": "Leave empty to find onepods-ctl on PATH.",
+        "defaultValue": ""
+      }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+#!/bin/bash
+# Installs the onepods daemon as a user service and puts onepods-ctl on PATH.
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+
+mkdir -p ~/.local/bin ~/.config/systemd/user
+cat > ~/.local/bin/onepods-ctl <<CTL
+#!/bin/sh
+exec /usr/bin/python3 "$here/daemon/onepods.py" "\$@"
+CTL
+chmod +x ~/.local/bin/onepods-ctl "$here/daemon/onepods.py"
+cp "$here/daemon/onepods.service" ~/.config/systemd/user/onepods.service
+
+systemctl --user daemon-reload
+systemctl --user enable onepods.service
+systemctl --user restart onepods.service
+echo "onepods is running. Status: onepods-ctl status"
