@@ -39,8 +39,8 @@
       {
         "key": "ctlPath",
         "type": "path",
-        "label": "Path to onepods-ctl",
-        "description": "Leave empty to find onepods-ctl on PATH.",
+        "label": "Path to oneplus-experience-ctl",
+        "description": "Leave empty to find oneplus-experience-ctl on PATH.",
         "defaultValue": ""
       }
     ]

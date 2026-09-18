@@ -60,15 +60,15 @@ function partFrom(raw) {
 function parseStatus(raw) {
   var status = defaultStatus()
   var text = String(raw || "").trim()
-  if (text === "") { status.lastError = "The onepods status file is empty"; return status }
+  if (text === "") { status.lastError = "The oneplus-experience status file is empty"; return status }
   var d
-  try { d = JSON.parse(text) } catch (e) { status.lastError = "Could not read the onepods status file"; return status }
+  try { d = JSON.parse(text) } catch (e) { status.lastError = "Could not read the oneplus-experience status file"; return status }
   if (!d || typeof d !== "object" || d.schema_version === undefined) {
-    status.lastError = "The onepods status file has no schema_version"
+    status.lastError = "The oneplus-experience status file has no schema_version"
     return status
   }
   if (d.schema_version > SUPPORTED_SCHEMA) {
-    status.lastError = "onepods speaks status schema " + d.schema_version + ", this panel reads " + SUPPORTED_SCHEMA
+    status.lastError = "oneplus-experience speaks status schema " + d.schema_version + ", this panel reads " + SUPPORTED_SCHEMA
     return status
   }
   var s = d.supports || {}

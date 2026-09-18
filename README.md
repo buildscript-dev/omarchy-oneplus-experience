@@ -38,7 +38,7 @@ in Omarchy's own panel style so it feels built in, the way AirPods feel on a Mac
 | Other OnePlus / OPPO / realme buds that use HeyMelody | Battery and basic noise control, untested |
 
 Adding full support for another model means adding its product ID to `MODELS`
-in `daemon/onepods.py`. Reports and pull requests are welcome.
+in `daemon/oneplus-experience.py`. Reports and pull requests are welcome.
 
 ## Requirements
 
@@ -59,13 +59,13 @@ omarchy plugin add https://github.com/buildscript-devv/omarchy-oneplus-experienc
 `omarchy plugin add` only clones the plugin. `setup` then does three things,
 all as your user:
 
-1. Writes `~/.local/bin/onepods-ctl`, a one-line wrapper around `daemon/onepods.py`.
-2. Copies `daemon/onepods.service` to `~/.config/systemd/user/`.
+1. Writes `~/.local/bin/oneplus-experience-ctl`, a one-line wrapper around `daemon/oneplus-experience.py`.
+2. Copies `daemon/oneplus-experience.service` to `~/.config/systemd/user/`.
 3. Enables and starts that user service.
 
 The daemon opens only a Bluetooth RFCOMM socket to your earbuds and a Unix
 socket readable by you alone (mode 0600). It stores the earbuds' MAC address,
-RFCOMM channel and last ANC strength in `~/.config/onepods/config.json`.
+RFCOMM channel and last ANC strength in `~/.config/oneplus-experience/config.json`.
 
 ## Settings
 
@@ -73,23 +73,23 @@ RFCOMM channel and last ANC strength in `~/.config/onepods/config.json`.
 |---|---|---|
 | Hide the icon when disconnected | off | |
 | Show the earbud battery next to the icon | on | The lower of the two buds |
-| Path to onepods-ctl | empty | Leave empty to find it on `PATH` |
+| Path to oneplus-experience-ctl | empty | Leave empty to find it on `PATH` |
 
 ## How it works
 
-- `daemon/onepods.py`: Python standard library only. Keeps one link to the
-  buds, writes `~/.local/state/onepods/status.json`, and takes commands on
-  `$XDG_RUNTIME_DIR/onepods.sock`.
-- `onepods-ctl`: the CLI, e.g. `onepods-ctl noise:anc`, `onepods-ctl level:mild`,
-  `onepods-ctl eq:0`, `onepods-ctl feature:game:off`, `onepods-ctl status`.
-- `onepods.service`: a systemd user unit, installed by `./setup`.
+- `daemon/oneplus-experience.py`: Python standard library only. Keeps one link to the
+  buds, writes `~/.local/state/oneplus-experience/status.json`, and takes commands on
+  `$XDG_RUNTIME_DIR/oneplus-experience.sock`.
+- `oneplus-experience-ctl`: the CLI, e.g. `oneplus-experience-ctl noise:anc`, `oneplus-experience-ctl level:mild`,
+  `oneplus-experience-ctl eq:0`, `oneplus-experience-ctl feature:game:off`, `oneplus-experience-ctl status`.
+- `oneplus-experience.service`: a systemd user unit, installed by `./setup`.
 
 ## Remove
 
 ```bash
-systemctl --user disable --now onepods
-rm ~/.config/systemd/user/onepods.service ~/.local/bin/onepods-ctl
-rm -rf ~/.config/onepods ~/.local/state/onepods
+systemctl --user disable --now oneplus-experience
+rm ~/.config/systemd/user/oneplus-experience.service ~/.local/bin/oneplus-experience-ctl
+rm -rf ~/.config/oneplus-experience ~/.local/state/oneplus-experience
 omarchy plugin remove io.github.buildscript-devv.oneplus-experience
 ```
 

@@ -10,7 +10,7 @@ import "Model.js" as Model
 Panel {
   id: root
   moduleName: "io.github.buildscript-devv.oneplus-experience"
-  ipcTarget: "onepods"
+  ipcTarget: "oneplus-experience"
   manageIpc: false
 
   property int cursorIndex: 0
@@ -169,7 +169,7 @@ Panel {
             meta: root.live ? (Model.modeName(root.st.noiseMode) + (root.st.firmware !== "" ? "  ·  fw " + root.st.firmware : ""))
               : pods.connected ? "Connected, opening controls…"
               : pods.daemonReachable ? "Not connected"
-              : "onepods service is not running"
+              : "oneplus-experience service is not running"
             foreground: root.foreground
             fontFamily: root.fontFamily
             iconOpacity: pods.connected ? 1.0 : 0.5
@@ -355,7 +355,7 @@ Panel {
             width: parent.width
             text: pods.daemonReachable
               ? "Take your OnePlus Buds out of the case, or press Connect, to see battery and controls."
-              : "Start it with: systemctl --user start onepods"
+              : "Start it with: systemctl --user start oneplus-experience"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.body

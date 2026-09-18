@@ -2,12 +2,12 @@
 """OnePlus Buds daemon for the Omarchy bar.
 
 Holds one RFCOMM link to the connected OnePlus/OPPO earbuds (the HeyMelody
-protocol), publishes their state to $XDG_STATE_HOME/onepods/status.json and
-takes commands on $XDG_RUNTIME_DIR/onepods.sock. Standard library only.
+protocol), publishes their state to $XDG_STATE_HOME/oneplus-experience/status.json and
+takes commands on $XDG_RUNTIME_DIR/oneplus-experience.sock. Standard library only.
 
-  onepods.py daemon        run the daemon (what the systemd unit does)
-  onepods.py ctl VERB      send VERB to the daemon, e.g. `noise:anc`
-  onepods.py status        print the published status
+  oneplus-experience.py daemon        run the daemon (what the systemd unit does)
+  oneplus-experience.py ctl VERB      send VERB to the daemon, e.g. `noise:anc`
+  oneplus-experience.py status        print the published status
 """
 
 from __future__ import annotations
@@ -26,10 +26,10 @@ SPP_UUID = "0000079a-d102-11e1-9b23-00025b00a5a5"
 # HeyMelody's control channel on Buds 3 is 15; older OPPO parts use 12 or 13.
 RFCOMM_CHANNELS = (15, 12, 13)
 
-STATE_DIR = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "onepods")
+STATE_DIR = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "oneplus-experience")
 STATUS_PATH = os.path.join(STATE_DIR, "status.json")
-SOCKET_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}", "onepods.sock")
-CONFIG_PATH = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "onepods", "config.json")
+SOCKET_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}", "oneplus-experience.sock")
+CONFIG_PATH = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "oneplus-experience", "config.json")
 
 DEVICE_POLL_S = 4.0
 BATTERY_REFRESH_S = 60.0
@@ -220,7 +220,7 @@ class Daemon:
         os.replace(tmp, STATUS_PATH)
         self.last_written = text
 
-    def notify(self, title: str, body: str, urgency: str = "normal", tag: str = "onepods") -> None:
+    def notify(self, title: str, body: str, urgency: str = "normal", tag: str = "oneplus-experience") -> None:
         if shutil.which("notify-send"):
             subprocess.Popen(["notify-send", "-a", "OnePlus Buds", "-u", urgency, "-i", "audio-headphones",
                               "-h", f"string:x-canonical-private-synchronous:{tag}", title, body],
@@ -241,7 +241,7 @@ class Daemon:
                     self.alerted[key] = step
                     what = "Earbuds" if key == "buds" else "Charging case"
                     self.notify(f"{what} battery low", f"{level}% remaining",
-                                "critical" if step <= 10 else "normal", f"onepods-{key}")
+                                "critical" if step <= 10 else "normal", f"oneplus-experience-{key}")
                     break
 
     def announce(self) -> None:
@@ -258,7 +258,7 @@ class Daemon:
         mode = {"anc": "Noise cancellation", "smart": "Smart ANC", "transparency": "Transparency",
                 "off": "Noise control off"}.get(self.state["noise_mode"], "")
         self.notify(self.state["model_name"] or self.state["device_name"] or "Earbuds connected",
-                    "   ".join(parts) + (f"\n{mode}" if mode else ""), tag="onepods-connect")
+                    "   ".join(parts) + (f"\n{mode}" if mode else ""), tag="oneplus-experience-connect")
 
     # -- link --------------------------------------------------------------
 
@@ -508,7 +508,7 @@ class Daemon:
         server.listen(4)
         server.setblocking(False)
         self.publish()
-        log("onepods daemon started")
+        log("oneplus-experience daemon started")
         try:
             while True:
                 now = time.monotonic()
@@ -585,7 +585,7 @@ def ctl(verb: str) -> int:
     try:
         s.connect(SOCKET_PATH)
     except OSError:
-        print("The onepods daemon is not running", file=sys.stderr)
+        print("The oneplus-experience daemon is not running", file=sys.stderr)
         return 2
     with s:
         s.sendall(verb.encode())
@@ -612,7 +612,7 @@ def main() -> int:
             print(open(STATUS_PATH).read().strip())
             return 0
         except OSError:
-            print("The onepods daemon is not running", file=sys.stderr)
+            print("The oneplus-experience daemon is not running", file=sys.stderr)
             return 2
     if len(args) == 2 and args[0] == "ctl":
         return ctl(args[1])

@@ -29,9 +29,9 @@ Item {
   }
   readonly property bool busy: commandProcess.running || connectionRequest !== ""
 
-  readonly property string ctlPath: String(setting("ctlPath", "") || "onepods-ctl")
+  readonly property string ctlPath: String(setting("ctlPath", "") || "oneplus-experience-ctl")
   readonly property string statePath: (Quickshell.env("XDG_STATE_HOME")
-    || Quickshell.env("HOME") + "/.local/state") + "/onepods/status.json"
+    || Quickshell.env("HOME") + "/.local/state") + "/oneplus-experience/status.json"
 
   // Optimistic value shown until the daemon confirms or the hold expires.
   property var _pending: ({})
@@ -177,7 +177,7 @@ Item {
       if (exitCode !== 0) {
         root._pending = ({})
         root.refresh()
-        root.showError(commandErr.text || "onepods-ctl rejected the command")
+        root.showError(commandErr.text || "oneplus-experience-ctl rejected the command")
       }
       if (root._queue.length > 0) {
         var next = root._queue[0]

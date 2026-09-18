@@ -1,17 +1,17 @@
 #!/bin/bash
-# Installs the onepods daemon as a user service and puts onepods-ctl on PATH.
+# Installs the oneplus-experience daemon as a user service and puts oneplus-experience-ctl on PATH.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 
 mkdir -p ~/.local/bin ~/.config/systemd/user
-cat > ~/.local/bin/onepods-ctl <<CTL
+cat > ~/.local/bin/oneplus-experience-ctl <<CTL
 #!/bin/sh
-exec /usr/bin/python3 "$here/daemon/onepods.py" "\$@"
+exec /usr/bin/python3 "$here/daemon/oneplus-experience.py" "\$@"
 CTL
-chmod +x ~/.local/bin/onepods-ctl "$here/daemon/onepods.py"
-cp "$here/daemon/onepods.service" ~/.config/systemd/user/onepods.service
+chmod +x ~/.local/bin/oneplus-experience-ctl "$here/daemon/oneplus-experience.py"
+cp "$here/daemon/oneplus-experience.service" ~/.config/systemd/user/oneplus-experience.service
 
 systemctl --user daemon-reload
-systemctl --user enable onepods.service
-systemctl --user restart onepods.service
-echo "onepods is running. Status: onepods-ctl status"
+systemctl --user enable oneplus-experience.service
+systemctl --user restart oneplus-experience.service
+echo "oneplus-experience is running. Status: oneplus-experience-ctl status"
