@@ -1,18 +1,20 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.buildscript-devv.onepods",
-  "name": "OnePlus Buds",
-  "version": "0.1.0",
+  "id": "io.github.buildscript-devv.oneplus-experience",
+  "name": "OnePlus Experience",
+  "version": "1.0.0",
   "author": "buildscript-devv",
   "license": "MIT",
-  "description": "OnePlus Buds controls in the Omarchy bar: per-bud and case battery, noise cancellation with strength, Smart ANC, EQ presets and feature switches, over the HeyMelody protocol.",
-  "kinds": ["bar-widget"],
+  "description": "The native AirPods-style experience for OnePlus earbuds: a HeyMelody alternative for Omarchy. Per-bud and case battery in the bar, a full control center for noise cancellation, Smart ANC, strength, EQ and switches, plus connect notifications and low-battery alerts.",
+  "kinds": [
+    "bar-widget"
+  ],
   "entryPoints": {
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "OnePlus Buds",
-    "description": "Battery, noise control, EQ and switches for OnePlus / OPPO earbuds.",
+    "displayName": "OnePlus Experience",
+    "description": "Control center for OnePlus earbuds: battery, noise control, EQ and switches.",
     "category": "Audio",
     "allowMultiple": false,
     "defaultSection": "right",

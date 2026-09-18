@@ -9,7 +9,7 @@ import "Model.js" as Model
 
 Panel {
   id: root
-  moduleName: "io.github.buildscript-devv.onepods"
+  moduleName: "io.github.buildscript-devv.oneplus-experience"
   ipcTarget: "onepods"
   manageIpc: false
 
