@@ -1,53 +1,60 @@
 <h1 align="center">OnePlus Experience for Omarchy</h1>
 
-<p align="center">
-  <b>The native AirPods-style experience, for OnePlus earbuds.</b><br>
-  A HeyMelody alternative for Omarchy: your earbuds' whole control center, one click from the bar.
-</p>
+<p align="center"><b>Your OnePlus earbuds' full control center, one click from the bar.</b></p>
 
-<p align="center"><img src="preview.png" alt="The OnePlus Experience control center open from the Omarchy bar" width="380"></p>
+<p align="center"><img src="preview.png" alt="The OnePlus Experience control center open from the Omarchy bar" width="420"></p>
 
-On a phone, OnePlus earbuds come alive in HeyMelody. On Linux they're just
-another Bluetooth headset. There's no battery per bud, no noise control and
-no EQ. OnePlus Experience brings that control center to Omarchy's bar, drawn
-in Omarchy's own panel style so it feels built in, the way AirPods feel on a Mac.
+<!-- Demo video: drag an .mp4 or .webm into any GitHub issue or PR comment box,
+     copy the https://github.com/user-attachments/assets/... URL it gives you,
+     and paste that URL on its own line right here. GitHub renders it inline. -->
 
-## The control center
+## What you get
 
-- **Battery at a glance.** Left, right and case levels in the panel, the lowest
-  bud's level next to the bar icon, and charging state for each part.
-- **Noise control.** Noise Cancellation with **Max / Moderate / Mild** strength,
-  **Smart ANC** that adapts to your surroundings, Transparency and Off.
-  Right-click the bar icon to cycle modes without opening anything.
-- **Sound.** Switch EQ presets instantly: Balanced, Deep Sea Bass, Pure Vocals,
-  Bright & Crisp.
-- **Switches.** Wear detection, game mode (low latency) and spatial audio.
-- **Connection.** Connect or disconnect from this PC in one click, a
-  notification with battery levels when your buds connect, and low-battery
-  alerts at 20%, 10% and 5%.
-- **Keyboard first.** `n` noise cancellation, `s` Smart ANC, `t` transparency,
-  `o` off, `1`–`4` EQ presets, `j`/`k` and Enter to move and select, Esc to close.
-- **Live.** The earbuds push changes, so a mode switched from the buds or your
-  phone shows up right away. There's no polling.
+- **The ANC controls Linux never had.** Not just on/off: **Max / Moderate / Mild**
+  strength and **Smart ANC** that adapts to the noise around you. These live in the
+  earbuds' own protocol, but no Linux tool exposes them, and on a phone they are
+  buried inside HeyMelody.
+- **Battery per bud, and the case.** Left, right and case, with charging state. The
+  lower bud shows next to the bar icon.
+- **EQ presets.** Balanced, Deep Sea Bass, Pure Vocals, Bright & Crisp.
+- **Switches.** Wear detection, game mode, spatial audio.
+- **Live, not polled.** The buds push changes, so a mode you switch on the buds or
+  from your phone appears right away.
+- **Keyboard first.** `n` ANC, `s` Smart ANC, `t` transparency, `o` off, `1`–`4` EQ,
+  `j`/`k` and Enter to move, Esc to close. Right-click the bar icon to cycle modes.
+
+## What Linux gave you before
+
+| | Controls available | |
+|---|---|---|
+| Plain Bluetooth (bluez) | `█░░░░░░░░░` | 1 of 10 — one combined battery number |
+| HeyMelody (phone only) | `██████████` | 10 of 10 — nothing on the desktop |
+| **OnePlus Experience** | `██████████` | **10 of 10, on your PC** |
+
+Counted over: per-bud battery, case battery, ANC, ANC strength, Smart ANC,
+transparency, EQ presets, wear detection, game mode, spatial audio.
+
+## What it costs to run
+
+| | | Measured |
+|---|---|---|
+| Memory | `█░░░░░░░░░` | 8.9 MiB (systemd `MemoryCurrent`) |
+| CPU, idle | `░░░░░░░░░░` | 0.2% of one core |
+| PyPI packages | `░░░░░░░░░░` | 0 — Python standard library only |
+| On disk | `█░░░░░░░░░` | 124 KB |
+
+Measured on OnePlus Buds 3, Omarchy 4, Python 3.14, over a 30 s idle window with the buds disconnected.
+Bars are drawn against a 100 MiB / 2% CPU / 10 packages / 1 MB scale.
 
 ## Supported earbuds
 
 | Earbuds | Status |
 |---|---|
-| OnePlus Buds 3 | Full control center, verified on hardware (firmware 127.127.101) |
-| Other OnePlus / OPPO / realme buds that use HeyMelody | Battery and basic noise control, untested |
+| OnePlus Buds 3 | Everything above, verified on hardware (firmware 127.127.101) |
+| Other OnePlus / OPPO / realme buds on HeyMelody | Battery and basic noise control, untested |
 
-Adding full support for another model means adding its product ID to `MODELS`
-in `daemon/oneplus-experience.py`. Reports and pull requests are welcome.
-
-## Requirements
-
-- Omarchy 4 (Quattro shell)
-- `python3`, `bluez` and `bluez-utils` (`bluetoothctl`). Omarchy ships all of these.
-- `libnotify` (`notify-send`), optional, for connect and low-battery notifications
-- Earbuds paired through the normal Bluetooth panel
-
-No root access, PyPI packages or network access are needed.
+To add full support for another model, add its product ID to `MODELS` in
+`daemon/oneplus-experience.py`. Reports and pull requests are welcome.
 
 ## Install
 
@@ -56,33 +63,30 @@ omarchy plugin add https://github.com/buildscript-dev/omarchy-oneplus-experience
 ~/.config/omarchy/plugins/io.github.buildscript-dev.oneplus-experience/setup
 ```
 
-`omarchy plugin add` only clones the plugin. `setup` then does three things,
-all as your user:
+`omarchy plugin add` clones the plugin. `setup` installs `oneplus-experience-ctl`
+into `~/.local/bin` and starts a systemd **user** service. No root, no network.
 
-1. Writes `~/.local/bin/oneplus-experience-ctl`, a one-line wrapper around `daemon/oneplus-experience.py`.
-2. Copies `daemon/oneplus-experience.service` to `~/.config/systemd/user/`.
-3. Enables and starts that user service.
-
-The daemon opens only a Bluetooth RFCOMM socket to your earbuds and a Unix
-socket readable by you alone (mode 0600). It stores the earbuds' MAC address,
-RFCOMM channel and last ANC strength in `~/.config/oneplus-experience/config.json`.
+**Needs:** Omarchy 4, `bluez` and `bluez-utils`, and your earbuds already paired.
+`libnotify` is optional, for connect and low-battery notifications. Omarchy ships
+all of these.
 
 ## Settings
 
-| Setting | Default | |
-|---|---|---|
-| Hide the icon when disconnected | off | |
-| Show the earbud battery next to the icon | on | The lower of the two buds |
-| Path to oneplus-experience-ctl | empty | Leave empty to find it on `PATH` |
+| Setting | Default |
+|---|---|
+| Hide the icon when disconnected | off |
+| Show the earbud battery next to the icon | on |
+| Path to `oneplus-experience-ctl` | empty, found on `PATH` |
 
-## How it works
+## From the terminal
 
-- `daemon/oneplus-experience.py`: Python standard library only. Keeps one link to the
-  buds, writes `~/.local/state/oneplus-experience/status.json`, and takes commands on
-  `$XDG_RUNTIME_DIR/oneplus-experience.sock`.
-- `oneplus-experience-ctl`: the CLI, e.g. `oneplus-experience-ctl noise:anc`, `oneplus-experience-ctl level:mild`,
-  `oneplus-experience-ctl eq:0`, `oneplus-experience-ctl feature:game:off`, `oneplus-experience-ctl status`.
-- `oneplus-experience.service`: a systemd user unit, installed by `./setup`.
+```bash
+oneplus-experience-ctl status
+oneplus-experience-ctl noise:anc
+oneplus-experience-ctl level:mild
+oneplus-experience-ctl eq:0
+oneplus-experience-ctl feature:game:off
+```
 
 ## Remove
 
@@ -95,15 +99,15 @@ omarchy plugin remove io.github.buildscript-dev.oneplus-experience
 
 ## Credits
 
-The panel design is adapted from
-[AirPods Experience](https://github.com/MB-JAMBON/omarchy-pods) by GM and MB-JAMBON (MIT).
-The protocol notes come from [OppoPodsWindows](https://github.com/3295074384/OppoPodsWindows),
+Panel design adapted from [AirPods Experience](https://github.com/MB-JAMBON/omarchy-pods)
+by GM and MB-JAMBON (MIT). Protocol notes from
+[OppoPodsWindows](https://github.com/3295074384/OppoPodsWindows),
 [oppo-pods](https://github.com/osp54/oppo-pods) and
 [oneplus-buds-omarchy](https://github.com/GazzasaurusRex/oneplus-buds-omarchy),
-and were checked against real OnePlus Buds 3 hardware.
+checked against real OnePlus Buds 3 hardware. MIT licensed.
 
 ## Disclaimer
 
-This is an independent project, not affiliated with or endorsed by OnePlus or
-OPPO. OnePlus, OPPO, HeyMelody and AirPods are trademarks of their respective
-owners, and appear here only to describe compatibility.
+An independent project, not affiliated with or endorsed by OnePlus or OPPO.
+OnePlus, OPPO, HeyMelody and AirPods are trademarks of their respective owners,
+and appear here only to describe compatibility.
