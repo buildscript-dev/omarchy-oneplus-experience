@@ -104,7 +104,14 @@ by GM and MB-JAMBON (MIT). Protocol notes from
 [OppoPodsWindows](https://github.com/3295074384/OppoPodsWindows),
 [oppo-pods](https://github.com/osp54/oppo-pods) and
 [oneplus-buds-omarchy](https://github.com/GazzasaurusRex/oneplus-buds-omarchy),
-checked against real OnePlus Buds 3 hardware. MIT licensed.
+checked against real OnePlus Buds 3 hardware.
+
+Only protocol facts were used from those projects, never their code. In
+particular [OppoPodsWindows](https://github.com/3295074384/OppoPodsWindows) is
+GPL-3.0 and none of it is copied, linked or redistributed here: this daemon is
+an independent Python implementation of the same wire format, written for
+interoperability with earbuds their owner already has. Preset and mode names are
+the earbuds' own labels, as HeyMelody reports them. This project is MIT.
 
 ## Disclaimer
 
