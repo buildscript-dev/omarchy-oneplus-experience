@@ -14,4 +14,5 @@ cp "$here/daemon/oneplus-experience.service" ~/.config/systemd/user/oneplus-expe
 systemctl --user daemon-reload
 systemctl --user enable oneplus-experience.service
 systemctl --user restart oneplus-experience.service
+[[ ":$PATH:" == *":$HOME/.local/bin:"* ]] || echo "Note: ~/.local/bin is not on your PATH, so oneplus-experience-ctl will not be found until you add it."
 echo "oneplus-experience is running. Status: oneplus-experience-ctl status"

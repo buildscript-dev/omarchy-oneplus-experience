@@ -507,6 +507,8 @@ class Daemon:
         os.chmod(SOCKET_PATH, 0o600)
         server.listen(4)
         server.setblocking(False)
+        if not shutil.which("bluetoothctl"):
+            self.state["error"] = "bluetoothctl is missing, install bluez-utils"
         self.publish()
         log("oneplus-experience daemon started")
         try:
