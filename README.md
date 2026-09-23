@@ -63,8 +63,9 @@ omarchy plugin add https://github.com/buildscript-dev/omarchy-oneplus-experience
 ~/.config/omarchy/plugins/io.github.buildscript-dev.oneplus-experience/setup
 ```
 
-`omarchy plugin add` clones the plugin. `setup` installs `oneplus-experience-ctl`
-into `~/.local/bin` and starts a systemd **user** service. No root, no network.
+`omarchy plugin add` clones the plugin. `setup` installs and starts one
+systemd **user** service, `~/.config/systemd/user/oneplus-experience.service`.
+Nothing else is installed. No root, no network.
 
 **Needs:** Omarchy 4, `bluez` and `bluez-utils`, and your earbuds already paired.
 `libnotify` is optional, for connect and low-battery notifications. Omarchy ships
@@ -76,24 +77,57 @@ all of these.
 |---|---|
 | Hide the icon when disconnected | off |
 | Show the earbud battery next to the icon | on |
-| Path to `oneplus-experience-ctl` | empty, found on `PATH` |
 
 ## From the terminal
 
 ```bash
-oneplus-experience-ctl status
-oneplus-experience-ctl noise:anc
-oneplus-experience-ctl level:mild
-oneplus-experience-ctl eq:0
-oneplus-experience-ctl feature:game:off
+ope="python3 -I ~/.config/omarchy/plugins/io.github.buildscript-dev.oneplus-experience/daemon/oneplus-experience.py"
+$ope status
+$ope noise:anc
+$ope level:mild
+$ope eq:0
+$ope feature:game:off
 ```
+
+## What it runs
+
+- **The daemon.** The service runs `/usr/bin/python3 -I` on this plugin's
+  `daemon/oneplus-experience.py` (standard library only). It holds one
+  Bluetooth RFCOMM link to the earbuds and makes no network connections.
+- **Commands the panel sends.** The panel runs that same file in the same
+  way, with a closed environment and a fixed `PATH`. It does not look
+  anything up on your `PATH`.
+  - Every call runs under GNU `timeout`, which ends the whole process group.
+  - Output is capped while it is written.
+- **Programs the daemon starts.** The daemon runs only `/usr/bin/bluetoothctl`
+  and, if it is installed, `/usr/bin/notify-send`. Each one gets:
+  - a closed environment;
+  - its own process group;
+  - a deadline;
+  - a hard cap on what it reads back.
+- **Its files.**
+  - Live state and the control socket are in
+    `/run/user/<uid>/oneplus-experience` (0700, in memory).
+  - Remembered settings are in `~/.config/oneplus-experience/config.json`.
+  - Every directory is opened one level at a time from `/`, without
+    following links. Each must belong to root or to you and be writable by
+    no one else.
+  - Reads are size-capped.
+  - Writes go to a fresh random 0600 file that is renamed into place.
+- **The socket.** It answers only processes running as you.
+- **What the earbuds report.** Names and versions from the earbuds and BlueZ
+  are stripped of markup and control characters and shortened, before they
+  reach the bar, its tooltip, the panel or a notification.
 
 ## Remove
 
 ```bash
 systemctl --user disable --now oneplus-experience
-rm ~/.config/systemd/user/oneplus-experience.service ~/.local/bin/oneplus-experience-ctl
-rm -rf ~/.config/oneplus-experience ~/.local/state/oneplus-experience
+rm ~/.config/systemd/user/oneplus-experience.service
+rm -rf ~/.config/oneplus-experience
+# Only if you installed a version before 1.1:
+rm -f ~/.local/bin/oneplus-experience-ctl
+rm -rf ~/.local/state/oneplus-experience
 omarchy plugin remove io.github.buildscript-dev.oneplus-experience
 ```
 

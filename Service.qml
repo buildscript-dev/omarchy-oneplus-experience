@@ -29,9 +29,19 @@ Item {
   }
   readonly property bool busy: commandProcess.running || connectionRequest !== ""
 
-  readonly property string ctlPath: String(setting("ctlPath", "") || "oneplus-experience-ctl")
-  readonly property string statePath: (Quickshell.env("XDG_STATE_HOME")
-    || Quickshell.env("HOME") + "/.local/state") + "/oneplus-experience/status.json"
+  // The panel talks to the daemon by running this plugin's own helper with the
+  // system interpreter in isolated mode: no lookup on PATH, no wrapper, and a
+  // closed environment. GNU timeout ends the whole process group, and output
+  // is capped while it is written (Model.command).
+  readonly property string helperPath: {
+    var u = String(Qt.resolvedUrl("daemon/oneplus-experience.py"))
+    return u.indexOf("file://") === 0 ? decodeURIComponent(u.slice(7)) : ""
+  }
+  readonly property string runtimeDir: {
+    var d = String(Quickshell.env("XDG_RUNTIME_DIR") || "")
+    return /^\/run\/user\/[0-9]+$/.test(d) ? d + "/oneplus-experience" : ""
+  }
+  readonly property var childEnv: ({ PATH: "/usr/bin", LANG: "C.UTF-8" })
 
   // Optimistic value shown until the daemon confirms or the hold expires.
   property var _pending: ({})
@@ -42,7 +52,9 @@ Item {
     return value === undefined || value === null ? fallback : value
   }
 
-  function refresh() { stateFile.reload() }
+  // The status file is only watched; its bytes come from the helper, which
+  // reads it through verified, non-following descriptors with a size cap.
+  function refresh() { if (!statusRead.running) statusRead.running = true }
 
   function applyLine(raw) {
     daemonReachable = true
@@ -75,7 +87,7 @@ Item {
 
   function _run(verb) {
     if (commandProcess.running) { _queue = [verb]; return }
-    commandProcess.command = [ctlPath, verb]
+    commandProcess.command = Model.command(root.helperPath, ["ctl", verb], 30)
     commandProcess.running = true
   }
 
@@ -129,7 +141,7 @@ Item {
     if (busy || !daemonReachable) return
     actionStatus = ""
     connectionRequest = status.connected ? "disconnect" : "connect"
-    connectionProcess.command = [ctlPath, connectionRequest]
+    connectionProcess.command = Model.command(root.helperPath, ["ctl", connectionRequest], 30)
     connectionProcess.running = true
     connectionTimer.restart()
   }
@@ -161,23 +173,39 @@ Item {
   }
 
   FileView {
-    id: stateFile
-    path: root.statePath
+    path: root.runtimeDir === "" ? "" : root.runtimeDir + "/status.json"
+    preload: false
     watchChanges: true
     printErrors: false
-    onFileChanged: reload()
-    onLoaded: root.applyLine(text())
-    onLoadFailed: root.stateGone()
+    onFileChanged: root.refresh()
+  }
+  // A watch on a file that doesn't exist yet can't fire, so a slow poll picks
+  // the daemon up when it starts.
+  Timer { interval: 10000; repeat: true; running: true; triggeredOnStart: true; onTriggered: root.refresh() }
+
+  Process {
+    id: statusRead
+    command: Model.command(root.helperPath, ["status"], 5)
+    environment: root.childEnv
+    clearEnvironment: true
+    stdout: StdioCollector { id: statusOut }
+    onExited: function (exitCode) {
+      var text = Model.capped(statusOut.text)
+      if (exitCode === 0 && text !== null) root.applyLine(text)
+      else root.stateGone()
+    }
   }
 
   Process {
     id: commandProcess
-    stderr: StdioCollector { id: commandErr; waitForEnd: true }
+    environment: root.childEnv
+    clearEnvironment: true
+    stdout: StdioCollector { id: commandErr }
     onExited: function (exitCode) {
       if (exitCode !== 0) {
         root._pending = ({})
         root.refresh()
-        root.showError(commandErr.text || "oneplus-experience-ctl rejected the command")
+        root.showError(Model.capped(commandErr.text) || "The earbuds rejected the command")
       }
       if (root._queue.length > 0) {
         var next = root._queue[0]
@@ -189,12 +217,14 @@ Item {
 
   Process {
     id: connectionProcess
-    stderr: StdioCollector { id: connectionErr; waitForEnd: true }
+    environment: root.childEnv
+    clearEnvironment: true
+    stdout: StdioCollector { id: connectionErr }
     onExited: function (exitCode) {
       if (exitCode !== 0) {
         root.connectionRequest = ""
         connectionTimer.stop()
-        root.showError(connectionErr.text || "Could not reach the earbuds")
+        root.showError(Model.capped(connectionErr.text) || "Could not reach the earbuds")
       }
       root.refresh()
     }

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.buildscript-dev.oneplus-experience",
   "name": "OnePlus Experience",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "buildscript-dev",
   "license": "MIT",
   "description": "The native AirPods-style experience for OnePlus earbuds: a HeyMelody alternative for Omarchy. Per-bud and case battery in the bar, a full control center for noise cancellation, Smart ANC, strength, EQ and switches, plus connect notifications and low-battery alerts.",
@@ -20,8 +20,7 @@
     "defaultSection": "right",
     "defaults": {
       "hideWhenDisconnected": false,
-      "showBatteryInBar": true,
-      "ctlPath": ""
+      "showBatteryInBar": true
     },
     "schema": [
       {
@@ -35,13 +34,6 @@
         "type": "boolean",
         "label": "Show the earbud battery next to the icon",
         "defaultValue": true
-      },
-      {
-        "key": "ctlPath",
-        "type": "path",
-        "label": "Path to oneplus-experience-ctl",
-        "description": "Leave empty to find oneplus-experience-ctl on PATH.",
-        "defaultValue": ""
       }
     ]
   }

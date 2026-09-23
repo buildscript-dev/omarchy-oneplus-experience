@@ -273,6 +273,7 @@ Panel {
               spacing: Style.space(6)
 
               Text {
+                textFormat: Text.PlainText
                 text: "Strength"
                 color: root.foreground
                 opacity: 0.6

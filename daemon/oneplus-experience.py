@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3 -I
 """OnePlus Buds daemon for the Omarchy bar.
 
 Holds one RFCOMM link to the connected OnePlus/OPPO earbuds (the HeyMelody
-protocol), publishes their state to $XDG_STATE_HOME/oneplus-experience/status.json and
-takes commands on $XDG_RUNTIME_DIR/oneplus-experience.sock. Standard library only.
+protocol), publishes their state to /run/user/<uid>/oneplus-experience/status.json
+and takes commands on the socket next to it. Standard library only.
 
   oneplus-experience.py daemon        run the daemon (what the systemd unit does)
   oneplus-experience.py ctl VERB      send VERB to the daemon, e.g. `noise:anc`
@@ -14,9 +14,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import secrets
 import select
-import shutil
+import signal
 import socket
+import stat
+import struct
 import subprocess
 import sys
 import time
@@ -26,10 +30,18 @@ SPP_UUID = "0000079a-d102-11e1-9b23-00025b00a5a5"
 # HeyMelody's control channel on Buds 3 is 15; older OPPO parts use 12 or 13.
 RFCOMM_CHANNELS = (15, 12, 13)
 
-STATE_DIR = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "oneplus-experience")
-STATUS_PATH = os.path.join(STATE_DIR, "status.json")
-SOCKET_PATH = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}", "oneplus-experience.sock")
-CONFIG_PATH = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "oneplus-experience", "config.json")
+UID = os.getuid()
+# Live state and the control socket sit in a private directory under the
+# login's runtime directory (root-created, per-user, 0700); remembered
+# settings (last earbuds, RFCOMM channel, ANC strength) in ~/.config.
+RUNTIME_DIR = f"/run/user/{UID}/oneplus-experience"
+CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "oneplus-experience")
+STATUS_NAME, SOCKET_NAME, CONFIG_NAME = "status.json", "oneplus-experience.sock", "config.json"
+STATUS_MAX, CONFIG_MAX = 64 * 1024, 64 * 1024
+
+BLUETOOTHCTL = "/usr/bin/bluetoothctl"
+NOTIFY_SEND = "/usr/bin/notify-send"
+MAC_RE = re.compile(r"^[0-9A-F]{2}(:[0-9A-F]{2}){5}$")
 
 DEVICE_POLL_S = 4.0
 BATTERY_REFRESH_S = 60.0
@@ -110,31 +122,200 @@ def log(*args) -> None:
     print(*args, file=sys.stderr, flush=True)
 
 
+def clean_text(value, limit: int = 64) -> str:
+    """Names and versions reported by the earbuds or BlueZ, safe to show anywhere:
+    no control characters, no markup brackets, bounded length."""
+    text = re.sub(r"[\x00-\x1f\x7f<>]", "", str(value or ""))
+    return text[:limit]
+
+
+# ---------------------------------------------------------------------------
+# Files: every path is walked from / one directory descriptor at a time, never
+# following a symlink, and each directory must belong to root or this user and
+# be writable by nobody else. Reads are capped; writes go to a fresh random
+# 0600 file in the same directory and are renamed into place.
+# ---------------------------------------------------------------------------
+
+DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def _check_dir(fd: int, path: str) -> None:
+    st = os.fstat(fd)
+    if st.st_uid not in (0, UID) or st.st_mode & 0o022:
+        raise OSError(f"refusing {path}: owned by uid {st.st_uid} or writable by others")
+
+
+def open_dir(path: str, create: bool = False) -> int:
+    """A verified descriptor for an absolute directory path, creating the missing
+    tail (mode 0700) when asked."""
+    fd = os.open("/", DIR_FLAGS)
+    try:
+        _check_dir(fd, "/")
+        walked = ""
+        for part in [p for p in path.split("/") if p]:
+            if part in (".", ".."):
+                raise OSError(f"refusing {path}")
+            walked += "/" + part
+            try:
+                nxt = os.open(part, DIR_FLAGS, dir_fd=fd)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                try:
+                    os.mkdir(part, 0o700, dir_fd=fd)
+                except FileExistsError:
+                    pass
+                nxt = os.open(part, DIR_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+            _check_dir(fd, walked)
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def read_capped(dfd: int, name: str, cap: int) -> bytes:
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dfd)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != UID or st.st_nlink != 1 or st.st_size > cap:
+            raise OSError(f"refusing {name}")
+        data = b""
+        while len(data) <= cap:
+            chunk = os.read(fd, cap + 1 - len(data))
+            if not chunk:
+                break
+            data += chunk
+        if len(data) > cap:
+            raise OSError(f"{name} is larger than {cap} bytes")
+        return data
+    finally:
+        os.close(fd)
+
+
+def write_atomic(dfd: int, name: str, data: bytes) -> None:
+    tmp = f".{name}.{secrets.token_hex(8)}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=dfd)
+    try:
+        with os.fdopen(fd, "wb", closefd=False) as f:
+            f.write(data)
+            f.flush()
+            os.fsync(fd)
+    except BaseException:
+        os.close(fd)
+        os.unlink(tmp, dir_fd=dfd)
+        raise
+    os.close(fd)
+    os.replace(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+
+
+def unlink_quiet(dfd: int, name: str) -> None:
+    try:
+        os.unlink(name, dir_fd=dfd)
+    except FileNotFoundError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Child processes: a fixed executable, a closed environment, its own process
+# group, a deadline, and output read with a hard cap. On overrun the whole
+# group is terminated and reaped here, by the parent that started it.
+# ---------------------------------------------------------------------------
+
+def child_env(session: bool = False) -> dict:
+    env = {"PATH": "/usr/bin", "LANG": "C.UTF-8"}
+    if session:
+        bus = os.environ.get("DBUS_SESSION_BUS_ADDRESS", "")
+        if re.fullmatch(rf"unix:path=/run/user/{UID}/bus", bus):
+            env["DBUS_SESSION_BUS_ADDRESS"] = bus
+        env["XDG_RUNTIME_DIR"] = f"/run/user/{UID}"
+    return env
+
+
+def run_capped(argv: list[str], timeout: float, cap: int = 64 * 1024, session: bool = False) -> str:
+    try:
+        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             env=child_env(session), start_new_session=True, close_fds=True)
+    except OSError:
+        return ""
+    out, end, over = b"", time.monotonic() + timeout, False
+    try:
+        while True:
+            left = end - time.monotonic()
+            if left <= 0:
+                over = True
+                break
+            ready, _, _ = select.select([p.stdout], [], [], left)
+            if not ready:
+                continue
+            chunk = os.read(p.stdout.fileno(), 4096)
+            if not chunk:
+                break
+            out += chunk
+            if len(out) > cap:
+                over = True
+                break
+    finally:
+        p.stdout.close()
+        if over or p.poll() is None:
+            for sig, wait in ((signal.SIGTERM, 1.0), (signal.SIGKILL, None)):
+                try:
+                    os.killpg(p.pid, sig)
+                except ProcessLookupError:
+                    break
+                try:
+                    p.wait(timeout=wait)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        p.wait()
+    return "" if over else out.decode("utf-8", "replace")
+
+
 # ---------------------------------------------------------------------------
 # Bluetooth helpers
 # ---------------------------------------------------------------------------
 
 def bluetoothctl(*args: str, timeout: float = 10) -> str:
-    try:
-        return subprocess.run(["bluetoothctl", *args], capture_output=True, text=True, timeout=timeout).stdout
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return ""
+    return run_capped([BLUETOOTHCTL, *args], timeout)
 
 
 def load_config() -> dict:
     try:
-        with open(CONFIG_PATH) as f:
-            return json.load(f)
+        dfd = open_dir(CONFIG_DIR)
+        try:
+            raw = json.loads(read_capped(dfd, CONFIG_NAME, CONFIG_MAX))
+        finally:
+            os.close(dfd)
     except (OSError, ValueError):
         return {}
+    if not isinstance(raw, dict):
+        return {}
+    # Only the keys this daemon writes, each checked for its type and range.
+    cfg = {}
+    if isinstance(raw.get("mac"), str) and MAC_RE.match(raw["mac"]):
+        cfg["mac"] = raw["mac"]
+    if isinstance(raw.get("name"), str):
+        cfg["name"] = clean_text(raw["name"])
+    if isinstance(raw.get("channel"), int) and 1 <= raw["channel"] <= 30:
+        cfg["channel"] = raw["channel"]
+    if raw.get("anc_level") in LEVEL_WRITE:
+        cfg["anc_level"] = raw["anc_level"]
+    if isinstance(raw.get("notify_connect"), bool):
+        cfg["notify_connect"] = raw["notify_connect"]
+    return cfg
 
 
 def save_config(cfg: dict) -> None:
-    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-    tmp = CONFIG_PATH + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(cfg, f, indent=2)
-    os.replace(tmp, CONFIG_PATH)
+    try:
+        dfd = open_dir(CONFIG_DIR, create=True)
+        try:
+            write_atomic(dfd, CONFIG_NAME, json.dumps(cfg, indent=2).encode())
+        finally:
+            os.close(dfd)
+    except OSError as e:
+        log(f"could not save settings: {e}")
 
 
 def is_oppo_device(mac: str) -> bool:
@@ -143,10 +324,11 @@ def is_oppo_device(mac: str) -> bool:
 
 def find_device(cfg: dict) -> tuple[str | None, str, bool]:
     """Return (mac, name, connected) for the earbuds, remembering the last ones seen."""
-    for line in bluetoothctl("devices", "Connected").splitlines():
+    for line in bluetoothctl("devices", "Connected").splitlines()[:64]:
         parts = line.split(" ", 2)
-        if len(parts) >= 2 and parts[0] == "Device":
-            mac, name = parts[1], parts[2] if len(parts) > 2 else parts[1]
+        if len(parts) >= 2 and parts[0] == "Device" and MAC_RE.match(parts[1]):
+            # The name is whatever the device advertises.
+            mac, name = parts[1], clean_text(parts[2] if len(parts) > 2 else parts[1])
             if mac == cfg.get("mac") or is_oppo_device(mac):
                 if cfg.get("mac") != mac or cfg.get("name") != name:
                     cfg.update(mac=mac, name=name)
@@ -172,6 +354,7 @@ class Daemon:
         self.announced = False
         self.reset_state()
         self.last_written = ""
+        self.runtime_fd = -1
 
     def reset_state(self) -> None:
         mac, name = self.cfg.get("mac"), self.cfg.get("name", "")
@@ -211,20 +394,17 @@ class Daemon:
         if m["name"]:
             self.state["model_name"] = m["name"]
         text = json.dumps(self.state, sort_keys=True)
-        if text == self.last_written:
+        if text == self.last_written or self.runtime_fd < 0:
             return
-        os.makedirs(STATE_DIR, exist_ok=True)
-        tmp = STATUS_PATH + ".tmp"
-        with open(tmp, "w") as f:
-            f.write(text + "\n")
-        os.replace(tmp, STATUS_PATH)
+        write_atomic(self.runtime_fd, STATUS_NAME, (text + "\n").encode())
         self.last_written = text
 
     def notify(self, title: str, body: str, urgency: str = "normal", tag: str = "oneplus-experience") -> None:
-        if shutil.which("notify-send"):
-            subprocess.Popen(["notify-send", "-a", "OnePlus Buds", "-u", urgency, "-i", "audio-headphones",
-                              "-h", f"string:x-canonical-private-synchronous:{tag}", title, body],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # notify-send is optional; without it the bar still shows everything.
+        if os.path.isfile(NOTIFY_SEND):
+            run_capped([NOTIFY_SEND, "-a", "OnePlus Buds", "-u", urgency, "-i", "audio-headphones",
+                        "-h", f"string:x-canonical-private-synchronous:{tag}", "--", title, body],
+                       5, 4096, session=True)
 
     def check_low_battery(self) -> None:
         buds = [self.state[k] for k in ("left", "right") if self.state[k]["available"]]
@@ -362,9 +542,9 @@ class Daemon:
             fields = p[2:].decode("ascii", "replace").split(",")
             parts = {}
             for i in range(0, len(fields) - 2, 3):
-                if fields[i + 1] == "2":
+                if fields[i + 1] == "2" and re.fullmatch(r"[0-9A-Za-z._-]{1,16}", fields[i + 2]):
                     parts[fields[i]] = fields[i + 2]
-            self.state["firmware"] = ".".join(parts[k] for k in ("1", "2", "3") if k in parts)
+            self.state["firmware"] = ".".join(parts[k] for k in ("1", "2", "3") if k in parts)[:48]
         elif cmd == 0x8106 and len(p) >= 2 and p[0] == 0:
             self.set_battery(p[2:2 + p[1] * 2], complete=True)
         elif cmd == 0x810C and len(p) >= 4 and p[0] == 0:
@@ -412,12 +592,14 @@ class Daemon:
     def command(self, verb: str) -> str:
         verb = verb.strip()
         mac = self.state["mac"] or self.cfg.get("mac")
+        if mac and not MAC_RE.match(mac):
+            mac = None
         if verb == "connect":
             if not mac:
                 return "error: no earbuds have been seen yet"
             out = bluetoothctl("connect", mac, timeout=20)
             self.last_poll = 0
-            return "ok" if "successful" in out.lower() else f"error: {out.strip().splitlines()[-1] if out.strip() else 'connect failed'}"
+            return "ok" if "successful" in out.lower() else f"error: {clean_text(out.strip().splitlines()[-1], 120) if out.strip() else 'connect failed'}"
         if verb == "disconnect":
             if not mac:
                 return "error: no earbuds have been seen yet"
@@ -497,17 +679,12 @@ class Daemon:
         self.publish()
 
     def run(self) -> None:
-        os.makedirs(os.path.dirname(SOCKET_PATH), exist_ok=True)
-        try:
-            os.unlink(SOCKET_PATH)
-        except FileNotFoundError:
-            pass
-        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        server.bind(SOCKET_PATH)
-        os.chmod(SOCKET_PATH, 0o600)
-        server.listen(4)
+        self.runtime_fd = open_dir(RUNTIME_DIR, create=True)
+        if os.fstat(self.runtime_fd).st_mode & 0o077:
+            raise SystemExit(f"{RUNTIME_DIR} must be private (0700)")
+        server = bind_socket(self.runtime_fd)
         server.setblocking(False)
-        if not shutil.which("bluetoothctl"):
+        if not os.path.isfile(BLUETOOTHCTL):
             self.state["error"] = "bluetoothctl is missing, install bluez-utils"
         self.publish()
         log("oneplus-experience daemon started")
@@ -547,11 +724,8 @@ class Daemon:
                     self.serve(server)
         finally:
             self.close_link()
-            for path in (SOCKET_PATH, STATUS_PATH):
-                try:
-                    os.unlink(path)
-                except FileNotFoundError:
-                    pass
+            unlink_quiet(self.runtime_fd, SOCKET_NAME)
+            unlink_quiet(self.runtime_fd, STATUS_NAME)
 
     def _safe(self, fn) -> None:
         try:
@@ -569,6 +743,8 @@ class Daemon:
         with conn:
             conn.settimeout(2)
             try:
+                if peer_uid(conn) != UID:
+                    return
                 verb = conn.recv(256).decode("utf-8", "replace")
                 try:
                     reply = self.command(verb)
@@ -581,28 +757,89 @@ class Daemon:
                 pass
 
 
-def ctl(verb: str) -> int:
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.settimeout(30)
+def peer_uid(conn: socket.socket) -> int:
+    creds = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+    return struct.unpack("3i", creds)[1]
+
+
+def socket_path(dfd: int) -> str:
+    # Bound and reached through the verified directory descriptor, so the
+    # socket is the one inside the checked directory whatever the path says.
+    return f"/proc/self/fd/{dfd}/{SOCKET_NAME}"
+
+
+def bind_socket(dfd: int) -> socket.socket:
     try:
-        s.connect(SOCKET_PATH)
+        st = os.stat(SOCKET_NAME, dir_fd=dfd, follow_symlinks=False)
+    except FileNotFoundError:
+        st = None
+    if st is not None:
+        if not stat.S_ISSOCK(st.st_mode) or st.st_uid != UID:
+            raise SystemExit(f"{RUNTIME_DIR}/{SOCKET_NAME} is not this daemon's socket")
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        probe.settimeout(1)
+        try:
+            probe.connect(socket_path(dfd))
+            raise SystemExit("another oneplus-experience daemon is already running")
+        except OSError:
+            unlink_quiet(dfd, SOCKET_NAME)  # left behind by a daemon that died
+        finally:
+            probe.close()
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    old = os.umask(0o177)
+    try:
+        server.bind(socket_path(dfd))
+    finally:
+        os.umask(old)
+    server.listen(4)
+    return server
+
+
+def ctl(verb: str) -> int:
+    try:
+        dfd = open_dir(RUNTIME_DIR)
     except OSError:
         print("The oneplus-experience daemon is not running", file=sys.stderr)
         return 2
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(30)
+    try:
+        s.connect(socket_path(dfd))
+        if peer_uid(s) != UID:
+            raise OSError("socket is not served by this user")
+    except OSError:
+        s.close()
+        os.close(dfd)
+        print("The oneplus-experience daemon is not running", file=sys.stderr)
+        return 2
+    os.close(dfd)
     with s:
-        s.sendall(verb.encode())
-        reply = s.recv(1024).decode()
+        s.sendall(verb[:256].encode())
+        reply = s.recv(1024).decode("utf-8", "replace")
     if reply.startswith("error: "):
-        print(reply[7:], file=sys.stderr)
+        print(clean_text(reply[7:], 200), file=sys.stderr)
         return 1
-    print(reply)
+    print(clean_text(reply, 200))
+    return 0
+
+
+def status() -> int:
+    try:
+        dfd = open_dir(RUNTIME_DIR)
+        try:
+            data = read_capped(dfd, STATUS_NAME, STATUS_MAX)
+        finally:
+            os.close(dfd)
+    except OSError:
+        print("The oneplus-experience daemon is not running", file=sys.stderr)
+        return 2
+    sys.stdout.write(data.decode("utf-8", "replace").strip() + "\n")
     return 0
 
 
 def main() -> int:
     args = sys.argv[1:]
     if args[:1] == ["daemon"]:
-        import signal
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         try:
             Daemon().run()
@@ -610,12 +847,7 @@ def main() -> int:
             pass
         return 0
     if args[:1] == ["status"]:
-        try:
-            print(open(STATUS_PATH).read().strip())
-            return 0
-        except OSError:
-            print("The oneplus-experience daemon is not running", file=sys.stderr)
-            return 2
+        return status()
     if len(args) == 2 and args[0] == "ctl":
         return ctl(args[1])
     if len(args) == 1:

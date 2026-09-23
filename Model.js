@@ -21,6 +21,47 @@ var FEATURE_TEXT = {
   spatial: ["Spatial audio", "Wider, surround-style sound"]
 }
 
+// ---------------------------------------------------------------------------
+// Running the helper. Everything it prints is capped while it is produced
+// (head -c, with pipefail), stderr is folded into the same capped stream, and
+// GNU timeout ends the whole process group, then KILLs it.
+var OUTPUT_MAX = 65536
+
+function command(helperPath, args, seconds) {
+  return ["/usr/bin/timeout", "-k", "2", String(seconds), "/usr/bin/bash", "-c",
+          "set -o pipefail; \"$@\" 2>&1 | /usr/bin/head -c " + (OUTPUT_MAX + 1), "helper",
+          "/usr/bin/python3", "-I", String(helperPath)].concat(args.map(String))
+}
+
+// The collected output, or null when it ran past the cap. The UTF-8 size is
+// counted from the decoded text; a stray byte decodes to U+FFFD (three bytes),
+// so the count never comes out smaller than what was read.
+function capped(text) {
+  var t = String(text || "")
+  var n = 0
+  for (var i = 0; i < t.length; i++) {
+    var c = t.charCodeAt(i)
+    n += c < 0x80 ? 1 : c < 0x800 ? 2 : (c >= 0xd800 && c <= 0xdbff) ? (i++, 4) : 3
+  }
+  return n > OUTPUT_MAX ? null : t
+}
+
+// Names and versions come from the earbuds and from BlueZ, so whatever they
+// say is stripped of markup brackets and control characters and kept short
+// before it reaches any text in the bar, its tooltip or the panel.
+function safeText(value, limit) {
+  var t = String(value === undefined || value === null ? "" : value).replace(/[\u0000-\u001f\u007f<>]/g, "")
+  return t.length > limit ? t.substring(0, limit - 1) + "…" : t
+}
+
+function words(list, max) {
+  var out = []
+  if (!Array.isArray(list)) return out
+  for (var i = 0; i < list.length && out.length < max; i++)
+    if (/^[a-z]{1,16}$/.test(String(list[i]))) out.push(String(list[i]))
+  return out
+}
+
 function defaultPart() {
   return { level: LEVEL_UNKNOWN, charging: false }
 }
@@ -52,7 +93,7 @@ function partFrom(raw) {
   var part = defaultPart()
   if (!raw || raw.available !== true) return part
   var n = parseInt(raw.level, 10)
-  part.level = isFinite(n) ? n : LEVEL_UNKNOWN
+  part.level = isFinite(n) && n >= 0 && n <= 100 ? n : LEVEL_UNKNOWN
   part.charging = raw.charging === true
   return part
 }
@@ -73,23 +114,32 @@ function parseStatus(raw) {
   }
   var s = d.supports || {}
   status.ok = true
-  status.lastError = String(d.error || "")
+  status.lastError = safeText(d.error, 140)
   status.connected = d.connected === true
   status.linked = d.linked === true
-  status.deviceName = String(d.device_name || "")
-  status.modelName = String(d.model_name || "")
-  status.firmware = String(d.firmware || "")
-  status.noiseMode = String(d.noise_mode || "")
-  status.ancLevel = String(d.anc_level || "")
-  status.eq = typeof d.eq === "number" ? d.eq : -1
-  status.features = d.features && typeof d.features === "object" ? d.features : {}
+  status.deviceName = safeText(d.device_name, 64)
+  status.modelName = safeText(d.model_name, 64)
+  status.firmware = safeText(d.firmware, 48)
+  status.noiseMode = words([d.noise_mode], 1)[0] || ""
+  status.ancLevel = words([d.anc_level], 1)[0] || ""
+  status.eq = typeof d.eq === "number" && d.eq >= -1 && d.eq < 256 ? Math.floor(d.eq) : -1
+  var features = {}
+  var raw = d.features && typeof d.features === "object" ? d.features : {}
+  for (var k in raw) if (FEATURE_TEXT[k] !== undefined) features[k] = raw[k] === true
+  status.features = features
   status.left = partFrom(d.left)
   status.right = partFrom(d.right)
   status.caseBattery = partFrom(d["case"])
-  status.modes = Array.isArray(s.modes) ? s.modes : []
-  status.levels = Array.isArray(s.levels) ? s.levels : []
-  status.eqPresets = Array.isArray(s.eq) ? s.eq : []
-  status.featureList = Array.isArray(s.features) ? s.features : []
+  status.modes = words(s.modes, 8)
+  status.levels = words(s.levels, 8)
+  var presets = []
+  var eq = Array.isArray(s.eq) ? s.eq : []
+  for (var j = 0; j < eq.length && presets.length < 16; j++) {
+    var id = eq[j] ? eq[j].id : undefined
+    if (typeof id === "number" && id >= 0 && id < 256) presets.push({ id: Math.floor(id), name: safeText(eq[j].name, 32) })
+  }
+  status.eqPresets = presets
+  status.featureList = words(s.features, 8)
   return status
 }
 
@@ -111,6 +161,5 @@ function modeName(mode) {
 }
 
 function elideError(message) {
-  var text = String(message || "").trim()
-  return text.length > 140 ? text.substring(0, 137) + "…" : text
+  return safeText(String(message || "").trim(), 140)
 }

@@ -1,18 +1,28 @@
 #!/bin/bash
-# Installs the oneplus-experience daemon as a user service and puts oneplus-experience-ctl on PATH.
+# Installs the oneplus-experience daemon as a systemd user service.
+# Only fixed system tools are used: PATH is set here, not inherited.
 set -euo pipefail
-here="$(cd "$(dirname "$0")" && pwd)"
+PATH=/usr/bin
+export PATH
+umask 022
+here="$(cd -- "$(dirname -- "$0")" && pwd -P)"
+unit_dir="$HOME/.config/systemd/user"
 
-mkdir -p ~/.local/bin ~/.config/systemd/user
-cat > ~/.local/bin/oneplus-experience-ctl <<CTL
-#!/bin/sh
-exec /usr/bin/python3 "$here/daemon/oneplus-experience.py" "\$@"
-CTL
-chmod +x ~/.local/bin/oneplus-experience-ctl "$here/daemon/oneplus-experience.py"
-cp "$here/daemon/oneplus-experience.service" ~/.config/systemd/user/oneplus-experience.service
+mkdir -p -- "$unit_dir"
+if [[ -L "$unit_dir/oneplus-experience.service" ]]; then
+  echo "Refusing to install over the symlink $unit_dir/oneplus-experience.service" >&2
+  exit 1
+fi
+# install replaces the file rather than writing through it.
+install -m 0644 -T -- "$here/daemon/oneplus-experience.service" "$unit_dir/oneplus-experience.service"
+
+# Versions before 1.1 put a wrapper on PATH; the panel no longer uses it.
+old="$HOME/.local/bin/oneplus-experience-ctl"
+if [[ -f "$old" && ! -L "$old" ]] && grep -q "oneplus-experience.py" -- "$old"; then
+  rm -f -- "$old"
+fi
 
 systemctl --user daemon-reload
 systemctl --user enable oneplus-experience.service
 systemctl --user restart oneplus-experience.service
-[[ ":$PATH:" == *":$HOME/.local/bin:"* ]] || echo "Note: ~/.local/bin is not on your PATH, so oneplus-experience-ctl will not be found until you add it."
-echo "oneplus-experience is running. Status: oneplus-experience-ctl status"
+echo "oneplus-experience is running. Status: python3 -I $here/daemon/oneplus-experience.py status"
