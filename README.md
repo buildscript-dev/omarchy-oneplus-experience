@@ -36,15 +36,26 @@ transparency, EQ presets, wear detection, game mode, spatial audio.
 
 ## What it costs to run
 
-| | | Measured |
-|---|---|---|
-| Memory | `█░░░░░░░░░` | 8.9 MiB (systemd `MemoryCurrent`) |
-| CPU, idle | `░░░░░░░░░░` | 0.2% of one core |
-| PyPI packages | `░░░░░░░░░░` | 0 — Python standard library only |
-| On disk | `█░░░░░░░░░` | 124 KB |
+1.2 against 1.0.x (`303997d`), both driving the same OnePlus Buds 3 on the same machine,
+each through the exact command chain its own panel uses:
 
-Measured on OnePlus Buds 3, Omarchy 4, Python 3.14, over a 30 s idle window with the buds disconnected.
-Bars are drawn against a 100 MiB / 2% CPU / 10 packages / 1 MB scale.
+| | 1.0.x | 1.2 |
+|---|---|---|
+| Mode switches confirmed by the buds | 20/20 | 20/20 |
+| `status`, median / p95 (30 runs) | 43.0 / 71.3 ms | 39.9 / 81.0 ms |
+| Mode switch, median / p95 (20 runs) | 69.5 / 73.9 ms | 77.7 / 82.5 ms |
+| Link after start | 0.6 s | 0.7 s |
+| CPU, idle and linked (120 s) | 0.18% of one core | 0.92% of one core |
+| Memory (RSS) | 16.3 MB | 20.5 MB |
+| PyPI packages | 0 | 0 |
+| Download | 120 KB | 150 KB |
+
+Commands respond as fast as before. Every command now runs under a deadline and an
+output cap. The extra idle CPU comes from Automatic mode, which checks the mic, the
+media players and, when per-network modes are set, the Wi-Fi network every 4 s.
+Turning Automatic off stops the mic and player checks.
+
+Measured on Omarchy with Python 3.14. CPU counts the daemon plus every program it starts.
 
 ## Supported earbuds
 
