@@ -9,11 +9,13 @@ var GLYPH_CHECK = "󰄬"
 var GLYPH_BUDS = "󱡏"
 
 var MODE_NAMES = {
+  smart: "Adaptive",
   anc: "Noise Cancellation",
-  smart: "Smart ANC",
   transparency: "Transparency",
+  vocal: "Conversation",
   off: "Off"
 }
+var MODE_SHORT = { smart: "Adaptive", anc: "ANC", transparency: "Transparency", vocal: "Voice", off: "Off" }
 var LEVEL_NAMES = { max: "Max", moderate: "Moderate", mild: "Mild" }
 var FEATURE_TEXT = {
   wear: ["Wear detection", "Pause when you take a bud out"],
@@ -85,7 +87,10 @@ function defaultStatus() {
     modes: [],
     levels: [],
     eqPresets: [],
-    featureList: []
+    featureList: [],
+    cycle: [],
+    auto: false,
+    listening: false
   }
 }
 
@@ -140,6 +145,9 @@ function parseStatus(raw) {
   }
   status.eqPresets = presets
   status.featureList = words(s.features, 8)
+  status.cycle = words(d.cycle, 8)
+  status.auto = d.auto === true
+  status.listening = d.listening === true
   return status
 }
 

@@ -36,6 +36,8 @@ Panel {
     if (!live) return rows
     for (var i = 0; i < st.modes.length; i++) rows.push("mode:" + st.modes[i])
     if (levelsVisible) for (var j = 0; j < st.levels.length; j++) rows.push("level:" + st.levels[j])
+    for (var c = 0; c < st.modes.length; c++) rows.push("cycle:" + st.modes[c])
+    rows.push("auto")
     for (var k = 0; k < st.eqPresets.length; k++) rows.push("eq:" + st.eqPresets[k].id)
     for (var m = 0; m < featureRows.length; m++) rows.push("feature:" + featureRows[m])
     return rows
@@ -62,6 +64,8 @@ Panel {
     if (name === "connection") pods.toggleConnection()
     else if (name.indexOf("mode:") === 0) pods.setNoiseMode(arg)
     else if (name.indexOf("level:") === 0) pods.setAncLevel(arg)
+    else if (name.indexOf("cycle:") === 0) pods.toggleCycle(arg)
+    else if (name === "auto") pods.setAuto(!st.auto)
     else if (name.indexOf("eq:") === 0) pods.setEq(parseInt(arg, 10))
     else if (name.indexOf("feature:") === 0) pods.setFeature(arg, st.features[arg] !== true)
   }
@@ -297,6 +301,46 @@ Panel {
                   }
                 }
               }
+            }
+
+            // Which modes right-click (and the bud stem, via the island) steps through.
+            Column {
+              width: parent.width
+              spacing: Style.space(6)
+
+              Text {
+                textFormat: Text.PlainText
+                text: "Right-click cycles through"
+                color: root.foreground
+                opacity: 0.6
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                leftPadding: Style.space(10)
+              }
+
+              RowLayout {
+                width: parent.width
+                spacing: Style.space(6)
+                Repeater {
+                  model: root.st.modes
+                  Segment {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 1
+                    rowName: "cycle:" + modelData
+                    label: Model.MODE_SHORT[modelData] || modelData
+                    selected: root.st.cycle.indexOf(modelData) >= 0
+                  }
+                }
+              }
+            }
+
+            ToggleRow {
+              width: parent.width
+              rowName: "auto"
+              label: "Automatic switching"
+              caption: "Transparency on calls, and 30 s after music pauses"
+              checked: root.st.auto
             }
           }
 

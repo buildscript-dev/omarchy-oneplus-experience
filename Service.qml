@@ -107,11 +107,25 @@ Item {
     _run("noise:" + mode)
   }
 
+  // The daemon owns the cycle (and any automatic override it cancels).
   function cycleNoiseMode() {
-    var modes = status.modes
-    if (!linked || modes.length === 0) return
-    var at = modes.indexOf(status.noiseMode)
-    setNoiseMode(modes[(at + 1) % modes.length])
+    if (!linked) return
+    _run("noise:next")
+  }
+
+  // Add or drop a mode from the right-click / stem cycle; two at least.
+  function toggleCycle(mode) {
+    var c = status.cycle.slice()
+    var at = c.indexOf(mode)
+    if (at >= 0) { if (c.length <= 2) return; c.splice(at, 1) }
+    else c = status.modes.filter(function (m) { return m === mode || c.indexOf(m) >= 0 })
+    var s = Object.assign({}, status); s.cycle = c; status = s
+    _run("cycle:" + c.join(","))
+  }
+
+  function setAuto(on) {
+    var s = Object.assign({}, status); s.auto = on; status = s
+    _run("auto:" + (on ? "on" : "off"))
   }
 
   function setAncLevel(level) {

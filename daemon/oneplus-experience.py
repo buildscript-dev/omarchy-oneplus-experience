@@ -44,6 +44,13 @@ NOTIFY_SEND = "/usr/bin/notify-send"
 MAC_RE = re.compile(r"^[0-9A-F]{2}(:[0-9A-F]{2}){5}$")
 
 DEVICE_POLL_S = 4.0
+# The modes the bud stem and right-click step through, AirPods-style.
+DEFAULT_CYCLE = ["anc", "transparency"]
+# Automatic switching: what to change to on a call and after music pauses.
+DEFAULT_AUTO = {"auto": True, "auto_call": "transparency", "auto_idle": "transparency", "auto_idle_s": 30}
+PACTL = "/usr/bin/pactl"
+BUSCTL = "/usr/bin/busctl"
+NMCLI = "/usr/bin/nmcli"
 BATTERY_REFRESH_S = 60.0
 LOW_BATTERY_STEPS = (20, 10, 5)
 
@@ -68,16 +75,21 @@ FEATURES = {
 # Noise-control bit indices. The Buds read back a different bit than they are
 # written with for Off and Transparency; HeyMelody's catalogue lists both.
 NOISE_BITS_READ = {0: "off", 3: "off", 1: "anc", 2: "transparency", 8: "transparency",
-                   4: "anc", 5: "anc", 6: "anc", 7: "smart"}
+                   4: "anc", 5: "anc", 6: "anc", 7: "smart", 9: "vocal"}
 LEVEL_BITS = {4: "max", 5: "moderate", 6: "mild"}
-NOISE_BITS_WRITE = {"off": 0, "transparency": 2, "smart": 7}
+# Bit 9 is transparency with voices brought forward (OPPO's "vocal
+# enhancement"). HeyMelody doesn't offer it for Buds 3, but the firmware
+# takes it and reports it back.
+# Transparency is written as its child bit 8, not its group bit 2: the group
+# bit re-enters whichever transparency the buds used last.
+NOISE_BITS_WRITE = {"off": 0, "transparency": 8, "smart": 7, "vocal": 9}
 LEVEL_WRITE = {"max": 4, "moderate": 5, "mild": 6}
 
 # Product ids (little-endian as sent, printed big-endian) -> model.
 MODELS = {
     "063C14": {
         "name": "OnePlus Buds 3",
-        "modes": ["anc", "smart", "transparency", "off"],
+        "modes": ["smart", "anc", "transparency", "vocal", "off"],
         "levels": ["max", "moderate", "mild"],
         # protocol index -> name, from HeyMelody's equalizerMode for this id.
         "eq": {0: "Balanced", 1: "Deep Sea Bass", 2: "Pure Vocals", 3: "Bright & Crisp"},
@@ -304,6 +316,20 @@ def load_config() -> dict:
         cfg["anc_level"] = raw["anc_level"]
     if isinstance(raw.get("notify_connect"), bool):
         cfg["notify_connect"] = raw["notify_connect"]
+    modes = set(NOISE_BITS_WRITE) | {"anc"}
+    if isinstance(raw.get("cycle"), list) and 2 <= len(raw["cycle"]) <= 8 and set(raw["cycle"]) <= modes:
+        cfg["cycle"] = list(dict.fromkeys(raw["cycle"]))
+    if isinstance(raw.get("auto"), bool):
+        cfg["auto"] = raw["auto"]
+    for key in ("auto_call", "auto_idle", "listen_mode"):
+        if raw.get(key) in modes or raw.get(key) == "":
+            cfg[key] = raw[key]
+    if isinstance(raw.get("auto_idle_s"), int) and 5 <= raw["auto_idle_s"] <= 3600:
+        cfg["auto_idle_s"] = raw["auto_idle_s"]
+    # {"Office Wi-Fi": "anc", "Home": "off"}: the mode to take on joining that network.
+    wifi = raw.get("auto_wifi")
+    if isinstance(wifi, dict) and len(wifi) <= 32:
+        cfg["auto_wifi"] = {clean_text(k): v for k, v in wifi.items() if isinstance(k, str) and v in modes}
     return cfg
 
 
@@ -352,6 +378,14 @@ class Daemon:
         self.pending_refresh = 0.0
         self.alerted: dict[str, int] = {}
         self.announced = False
+        # Automatic switching. `base` is the mode to go back to while an
+        # override (hold-to-listen, a call, paused music) is in force.
+        self.override = ""        # "listen" | "call" | "idle" | ""
+        self.base = ""
+        self.dismissed = ""       # an override the user overruled by hand, until it ends
+        self.last_playing = time.monotonic()
+        self.was_playing = False
+        self.network = None
         self.reset_state()
         self.last_written = ""
         self.runtime_fd = -1
@@ -375,6 +409,9 @@ class Daemon:
             "right": {"available": False, "level": -1, "charging": False},
             "case": {"available": False, "level": -1, "charging": False},
             "supports": {"modes": [], "levels": [], "eq": [], "features": []},
+            "cycle": [],
+            "auto": True,
+            "listening": False,
             "error": "",
         }
 
@@ -382,6 +419,10 @@ class Daemon:
 
     def model(self) -> dict:
         return MODELS.get(self.state["product_id"], GENERIC_MODEL)
+
+    def cycle(self) -> list[str]:
+        modes = self.model()["modes"]
+        return [c for c in self.cfg.get("cycle", DEFAULT_CYCLE) if c in modes] or modes
 
     def publish(self) -> None:
         m = self.model()
@@ -393,6 +434,9 @@ class Daemon:
         }
         if m["name"]:
             self.state["model_name"] = m["name"]
+        self.state["cycle"] = self.cycle()
+        self.state["auto"] = self.cfg.get("auto", DEFAULT_AUTO["auto"])
+        self.state["listening"] = self.override == "listen"
         text = json.dumps(self.state, sort_keys=True)
         if text == self.last_written or self.runtime_fd < 0:
             return
@@ -611,21 +655,50 @@ class Daemon:
             if self.sock:
                 self.query_state()
             return "ok"
+        if verb == "reload":
+            self.cfg = {**load_config(), **{k: self.cfg[k] for k in ("mac", "name", "channel") if k in self.cfg}}
+            self.publish()
+            return "ok"
+        kind, _, arg = verb.partition(":")
+        if kind == "cycle":
+            wanted = [c for c in arg.split(",") if c]
+            if len(wanted) < 2 or any(c not in NOISE_BITS_WRITE and c != "anc" for c in wanted):
+                return "error: usage cycle:<mode>,<mode>[,…] with at least two modes"
+            self.cfg["cycle"] = list(dict.fromkeys(wanted))
+            save_config(self.cfg)
+            self.publish()
+            return "ok"
+        if kind == "auto" and arg in ("on", "off"):
+            self.cfg["auto"] = arg == "on"
+            save_config(self.cfg)
+            if arg == "off" and self.override in ("call", "idle"):
+                self.end_override()
+            self.publish()
+            return "ok"
         if not self.sock:
             return "error: earbuds are not connected"
 
         m = self.model()
-        kind, _, arg = verb.partition(":")
+        if kind == "listen" and arg in ("on", "off"):
+            # Hold-to-listen: a key held down lets the world in, releasing it
+            # puts back whatever was on before.
+            if arg == "on":
+                self.start_override("listen", self.cfg.get("listen_mode", "transparency"))
+            elif self.override == "listen":
+                self.end_override()
+            self.publish()
+            return "ok"
+        if kind == "noise" and arg == "next":
+            cycle = self.cycle()
+            cur = self.state["noise_mode"]
+            arg = cycle[(cycle.index(cur) + 1) % len(cycle)] if cur in cycle else cycle[0]
         if kind == "noise":
             if arg not in m["modes"]:
                 return f"error: {self.state['model_name'] or 'these earbuds'} have no '{arg}' mode"
-            if arg == "anc":
-                level = self.cfg.get("anc_level", "max")
-                bit = LEVEL_WRITE.get(level, 1) if m["levels"] else 1
-            else:
-                bit = NOISE_BITS_WRITE[arg]
-            self.write_noise(bit)
-            self.state["noise_mode"] = arg
+            # A mode picked by hand wins over any automatic one until that ends.
+            if self.override:
+                self.dismissed, self.override, self.base = self.override, "", ""
+            self.set_mode(arg)
         elif kind == "level":
             if arg not in m["levels"]:
                 return f"error: unknown ANC strength '{arg}'"
@@ -652,6 +725,100 @@ class Daemon:
             return f"error: unknown command '{verb}'"
         self.publish()
         return "ok"
+
+    def set_mode(self, mode: str) -> None:
+        m = self.model()
+        if mode == "anc":
+            level = self.cfg.get("anc_level", "max")
+            bit = LEVEL_WRITE.get(level, 1) if m["levels"] else 1
+        else:
+            bit = NOISE_BITS_WRITE[mode]
+        self.write_noise(bit)
+        self.state["noise_mode"] = mode
+
+    # -- automatic switching ------------------------------------------------
+
+    def start_override(self, kind: str, mode: str) -> None:
+        if mode not in self.model()["modes"]:
+            return
+        if not self.override:
+            self.base = self.state["noise_mode"]
+        self.override = kind
+        if self.state["noise_mode"] != mode:
+            self.set_mode(mode)
+
+    def end_override(self) -> None:
+        base, self.override, self.base = self.base, "", ""
+        if base and base in self.model()["modes"] and base != self.state["noise_mode"]:
+            self.set_mode(base)
+
+    def mic_in_use(self) -> bool:
+        """A capture stream on anything but a monitor source: a call, a meeting."""
+        monitors = {line.split("\t")[0] for line in run_capped([PACTL, "list", "short", "sources"], 3, session=True).splitlines()
+                    if ".monitor" in line}
+        for line in run_capped([PACTL, "list", "short", "source-outputs"], 3, session=True).splitlines():
+            parts = line.split("\t")
+            if len(parts) > 1 and parts[1] not in monitors:
+                return True
+        return False
+
+    def media_playing(self) -> bool:
+        # Running players only: querying an activatable name would start it.
+        players = []
+        for line in run_capped([BUSCTL, "--user", "--no-legend", "list"], 3, session=True).splitlines():
+            cols = line.split()
+            if len(cols) > 1 and cols[1].isdigit() and re.fullmatch(r"org\.mpris\.MediaPlayer2\.[A-Za-z0-9._-]{1,128}", cols[0]):
+                players.append(cols[0])
+        players = players[:16]
+        for name in players:
+            out = run_capped([BUSCTL, "--user", "get-property", name, "/org/mpris/MediaPlayer2",
+                              "org.mpris.MediaPlayer2.Player", "PlaybackStatus"], 2, 256, session=True)
+            if out.strip() == 's "Playing"':
+                return True
+        return False
+
+    def active_network(self) -> str:
+        out = run_capped([NMCLI, "-t", "-f", "NAME,TYPE", "connection", "show", "--active"], 3)
+        for line in out.splitlines():
+            name, _, kind = line.rpartition(":")
+            if kind == "802-11-wireless":
+                return clean_text(name.replace("\\:", ":"))
+        return ""
+
+    def auto_tick(self) -> None:
+        if not self.sock or self.override == "listen":
+            return
+        now = time.monotonic()
+        wifi = self.cfg.get("auto_wifi") or {}
+        if wifi:
+            net = self.active_network()
+            if net != self.network:
+                self.network = net
+                if not self.override and wifi.get(net) in self.model()["modes"]:
+                    self.set_mode(wifi[net])
+        if not self.cfg.get("auto", DEFAULT_AUTO["auto"]):
+            return
+        call_mode = self.cfg.get("auto_call", DEFAULT_AUTO["auto_call"])
+        idle_mode = self.cfg.get("auto_idle", DEFAULT_AUTO["auto_idle"])
+        want = ""
+        if call_mode and self.mic_in_use():
+            want = "call"
+        elif idle_mode:
+            playing = self.media_playing()
+            if playing:
+                self.last_playing = now
+            # Only a pause counts: music that stopped, not silence you chose.
+            elif self.was_playing or self.override == "idle":
+                if now - self.last_playing >= self.cfg.get("auto_idle_s", DEFAULT_AUTO["auto_idle_s"]):
+                    want = "idle"
+            if playing or want:
+                self.was_playing = playing
+        if want != self.dismissed:
+            self.dismissed = ""
+        if want and want != self.dismissed and want != self.override:
+            self.start_override(want, call_mode if want == "call" else idle_mode)
+        elif not want and self.override:
+            self.end_override()
 
     def write_noise(self, bit: int) -> None:
         width = bit // 8 + 1
@@ -694,6 +861,7 @@ class Daemon:
                 if now - self.last_poll >= DEVICE_POLL_S:
                     self.last_poll = now
                     self.poll_device()
+                    self._safe(self.auto_tick)
                 if self.sock and self.pending_refresh and now >= self.pending_refresh:
                     self.pending_refresh = 0.0
                     self._safe(self.query_state)

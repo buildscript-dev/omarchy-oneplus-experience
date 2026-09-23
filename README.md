@@ -71,6 +71,52 @@ Nothing else is installed. No root, no network.
 `libnotify` is optional, for connect and low-battery notifications. Omarchy ships
 all of these.
 
+## Noise control
+
+| Mode | What it does |
+|---|---|
+| Adaptive | ANC that sets its own strength for the room (the buds' Smart ANC) |
+| Noise Cancellation | fixed ANC at the strength you pick: Max, Moderate or Mild |
+| Transparency | lets the room in |
+| Conversation | transparency with voices brought forward (OPPO's vocal enhancement; HeyMelody doesn't offer it on Buds 3, but the firmware accepts it) |
+| Off | nothing on top of the music |
+
+- **Right-click cycle.** Right-click the bar icon (or `noise:next`) to step
+  through the modes you picked in the panel's cycle row. The default is Noise
+  Cancellation ↔ Transparency, as on AirPods.
+- **Hold to listen.** While a key is held, the buds switch to Transparency.
+  On release, whatever was on before comes back. Bind the press and the
+  release in `~/.config/hypr/bindings.lua`:
+
+  ```lua
+  local ope = "/usr/bin/python3 -I " .. os.getenv("HOME") .. "/.config/omarchy/plugins/io.github.buildscript-dev.oneplus-experience/daemon/oneplus-experience.py"
+  o.bind("SUPER + ALT + T", "Buds: hold to listen", ope .. " listen:on")
+  o.bind("SUPER + ALT + T", "Buds: stop listening", ope .. " listen:off", { release = true })
+  o.bind("SUPER + ALT + N", "Buds: next noise mode", ope .. " noise:next")
+  ```
+
+- **Automatic switching** (on by default, toggled in the panel). The buds
+  switch to Transparency when a call or meeting opens the microphone, and
+  when music has been paused for 30 seconds. They go back when the call ends
+  or the music plays again.
+  - Silence you chose is left alone: only a pause counts, not music that
+    never played.
+  - A mode you pick by hand wins until that call or pause is over.
+- **Per-network modes and tuning.** `~/.config/oneplus-experience/config.json`
+  takes these keys; run `$ope reload` after editing:
+
+  ```json
+  {
+    "auto_wifi": { "Office Wi-Fi": "anc", "Home": "smart" },
+    "auto_call": "transparency",
+    "auto_idle": "transparency",
+    "auto_idle_s": 30,
+    "listen_mode": "vocal"
+  }
+  ```
+
+  Set `auto_call` or `auto_idle` to `""` to turn off just that rule.
+
 ## Settings
 
 | Setting | Default |
@@ -83,7 +129,10 @@ all of these.
 ```bash
 ope="python3 -I ~/.config/omarchy/plugins/io.github.buildscript-dev.oneplus-experience/daemon/oneplus-experience.py"
 $ope status
-$ope noise:anc
+$ope noise:anc          # smart, anc, transparency, vocal, off, next
+$ope listen:on / listen:off
+$ope cycle:anc,transparency
+$ope auto:on / auto:off
 $ope level:mild
 $ope eq:0
 $ope feature:game:off
